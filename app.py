@@ -100,7 +100,7 @@ def process_documents(files):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # Ultra-fast & bulletproof BM25 Retriever (No Embedding API needed)
+    # Ultra-fast & bulletproof BM25 Retriever
     retriever = BM25Retriever.from_documents(chunks)
     retriever.k = 4
 
@@ -164,8 +164,9 @@ Context:
 Question: {input}
 """)
 
+            # Fixed model name to gemini-pro (Universal support)
             llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-flash",
+                model="gemini-pro",
                 google_api_key=api_key,
                 temperature=0.2
             )
