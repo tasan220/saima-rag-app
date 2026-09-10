@@ -1,14 +1,12 @@
 import os
 import tempfile
 import streamlit as st
+import google.generativeai as genai
 
-# Modern LangChain Imports
+# LangChain Imports for Loader & Retriever
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.retrievers import BM25Retriever
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 # =========================================================
 # ⚙️ PAGE CONFIGURATION
@@ -100,7 +98,6 @@ def process_documents(files):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # Ultra-fast & bulletproof BM25 Retriever
     retriever = BM25Retriever.from_documents(chunks)
     retriever.k = 4
 
@@ -150,48 +147,47 @@ if query := st.chat_input("Ask anything from your documents..."):
         with st.spinner("🧠 Searching Indexed Documents & Reasoning..."):
 
             retrieved_docs = st.session_state.retriever.invoke(query)
-
             context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
 
-            prompt = ChatPromptTemplate.from_template("""You are an Enterprise AI Research Assistant created by Saima.
+            prompt = f"""You are an Enterprise AI Research Assistant created by Saima.
 Use the following retrieved context pieces to answer the user's question.
 If the answer is NOT present in the provided context, state clearly:
 'I cannot find the answer in the uploaded documents.' Do not invent information.
 
 Context:
-{context}
+{context_text}
 
-Question: {input}
-""")
+Question: {query}
+"""
 
-            # Fixed model name to gemini-pro (Universal support)
-            llm = ChatGoogleGenerativeAI(
-                model="gemini-pro",
-                google_api_key=api_key,
-                temperature=0.2
-            )
+            try:
+                # Direct Google Native Gemini Call
+                genai.configure(api_key=api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                response = model.generate_content(prompt)
+                answer = response.text
 
-            rag_chain = prompt | llm | StrOutputParser()
-            answer = rag_chain.invoke({"context": context_text, "input": query})
+                st.markdown(answer)
 
-            st.markdown(answer)
+                sources = []
+                for doc in retrieved_docs:
+                    sources.append({
+                        "file": doc.metadata.get("source_file", "Unknown PDF"),
+                        "page": doc.metadata.get("page", 0) + 1,
+                        "content": doc.page_content[:200].replace("\n", " ")
+                    })
 
-            sources = []
-            for doc in retrieved_docs:
-                sources.append({
-                    "file": doc.metadata.get("source_file", "Unknown PDF"),
-                    "page": doc.metadata.get("page", 0) + 1,
-                    "content": doc.page_content[:200].replace("\n", " ")
+                if sources:
+                    with st.expander("📌 Source Citations & References"):
+                        for src in sources:
+                            html_code = f"<div class='source-box'><b>📄 File:</b> {src['file']} | <b>📖 Page:</b> {src['page']}<br><i>\"{src['content']}...\"</i></div>"
+                            st.markdown(html_code, unsafe_allow_html=True)
+
+                st.session_state.chat_history.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "sources": sources
                 })
 
-            if sources:
-                with st.expander("📌 Source Citations & References"):
-                    for src in sources:
-                        html_code = f"<div class='source-box'><b>📄 File:</b> {src['file']} | <b>📖 Page:</b> {src['page']}<br><i>\"{src['content']}...\"</i></div>"
-                        st.markdown(html_code, unsafe_allow_html=True)
-
-            st.session_state.chat_history.append({
-                "role": "assistant",
-                "content": answer,
-                "sources": sources
-            })
+            except Exception as e:
+                st.error(f"Error calling Gemini API: {str(e)}")
