@@ -1,7 +1,6 @@
 streamlit
 pypdf
-langchain
 langchain-community
 langchain-text-splitters
 rank-bm25
-google-generativeai
+requests
