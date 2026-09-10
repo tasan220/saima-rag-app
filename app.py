@@ -72,6 +72,38 @@ if "retriever" not in st.session_state:
     st.session_state.retriever = None
 
 
+# Dynamic Gemini Response Generator (Auto-detects working model)
+def generate_gemini_response(api_key, prompt_text):
+    genai.configure(api_key=api_key)
+    
+    # 1. Try auto-detecting supported model from user's API Key
+    selected_model = None
+    try:
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                if 'gemini-1.5-flash' in m.name or 'gemini-pro' in m.name:
+                    selected_model = m.name
+                    break
+    except Exception:
+        pass
+
+    # 2. Fallback model list if auto-detection fails
+    fallback_models = [selected_model, "gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash"]
+    fallback_models = [m for m in fallback_models if m] # filter None
+
+    last_error = None
+    for model_name in fallback_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            res = model.generate_content(prompt_text)
+            return res.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise last_error
+
+
 # =========================================================
 # 🔄 DOCUMENT PROCESSING & INDEXING
 # =========================================================
@@ -161,11 +193,8 @@ Question: {query}
 """
 
             try:
-                # Direct Google Native Gemini Call
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel("gemini-1.5-flash")
-                response = model.generate_content(prompt)
-                answer = response.text
+                # Call Gemini using smart auto-detection function
+                answer = generate_gemini_response(api_key, prompt)
 
                 st.markdown(answer)
 
