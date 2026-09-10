@@ -1,9 +1,9 @@
 import os
 import tempfile
+import requests
 import streamlit as st
-import google.generativeai as genai
 
-# LangChain Imports for Loader & Retriever
+# LangChain Imports for PDF Processing & BM25
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.retrievers import BM25Retriever
@@ -35,6 +35,64 @@ st.markdown("""
 
 st.title("🧠 Enterprise RAG Intelligence System")
 st.caption("⚡ Upload any PDF / Research Paper & Chat with 100% Citation Accuracy")
+
+# =========================================================
+# 🔑 DIRECT REST API CALLER FOR GEMINI (Bulletproof Solution)
+# =========================================================
+def call_gemini_rest_api(api_key, prompt_text):
+    # Step 1: Auto-discover available models for this specific user key
+    list_models_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    
+    selected_model_path = None
+    try:
+        res = requests.get(list_models_url, timeout=10)
+        if res.status_code == 200:
+            models_list = res.json().get('models', [])
+            for m in models_list:
+                methods = m.get('supportedGenerationMethods', [])
+                if 'generateContent' in methods:
+                    name = m.get('name', '')
+                    if 'gemini' in name:
+                        selected_model_path = name
+                        if 'flash' in name: # Prefer flash if available
+                            break
+    except Exception:
+        pass
+
+    # Fallback to standard path if discovery fails
+    if not selected_model_path:
+        selected_model_path = "models/gemini-1.5-flash"
+
+    # Step 2: Direct REST POST Request to Gemini
+    endpoint_url = f"https://generativelanguage.googleapis.com/v1beta/{selected_model_path}:generateContent?key={api_key}"
+    
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [
+            {
+                "parts": [{"text": prompt_text}]
+            }
+        ]
+    }
+
+    response = requests.post(endpoint_url, json=payload, headers=headers, timeout=30)
+    
+    if response.status_code == 200:
+        data = response.json()
+        try:
+            return data['candidates'][0]['content']['parts'][0]['text']
+        except (KeyError, IndexError):
+            return "Unable to parse response from Gemini API."
+    else:
+        # If v1beta fails, try v1 fallback endpoint
+        alt_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={api_key}"
+        alt_response = requests.post(alt_url, json=payload, headers=headers, timeout=30)
+        if alt_response.status_code == 200:
+            data = alt_response.json()
+            return data['candidates'][0]['content']['parts'][0]['text']
+        
+        raise Exception(f"API Error ({response.status_code}): {response.text}")
+
 
 # =========================================================
 # 🔑 SIDEBAR - API KEY, FILE UPLOAD & SAIMA'S BRANDING
@@ -70,38 +128,6 @@ if "chat_history" not in st.session_state:
 
 if "retriever" not in st.session_state:
     st.session_state.retriever = None
-
-
-# Dynamic Gemini Response Generator (Auto-detects working model)
-def generate_gemini_response(api_key, prompt_text):
-    genai.configure(api_key=api_key)
-    
-    # 1. Try auto-detecting supported model from user's API Key
-    selected_model = None
-    try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if 'gemini-1.5-flash' in m.name or 'gemini-pro' in m.name:
-                    selected_model = m.name
-                    break
-    except Exception:
-        pass
-
-    # 2. Fallback model list if auto-detection fails
-    fallback_models = [selected_model, "gemini-pro", "gemini-1.5-pro", "gemini-1.5-flash"]
-    fallback_models = [m for m in fallback_models if m] # filter None
-
-    last_error = None
-    for model_name in fallback_models:
-        try:
-            model = genai.GenerativeModel(model_name)
-            res = model.generate_content(prompt_text)
-            return res.text
-        except Exception as e:
-            last_error = e
-            continue
-
-    raise last_error
 
 
 # =========================================================
@@ -193,8 +219,8 @@ Question: {query}
 """
 
             try:
-                # Call Gemini using smart auto-detection function
-                answer = generate_gemini_response(api_key, prompt)
+                # Direct REST API Call (Bypasses Python SDK version issues completely)
+                answer = call_gemini_rest_api(api_key, prompt)
 
                 st.markdown(answer)
 
