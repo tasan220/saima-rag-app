@@ -1,9 +1,9 @@
 streamlit
 pypdf
 chromadb
-langchain
 langchain-core
 langchain-community
 langchain-text-splitters
-langchain-google-genai>=2.0.0
-google-genai>=1.0.0
+langchain-google-genai
+langchain-chroma
+google-genai
