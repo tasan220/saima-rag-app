@@ -6,7 +6,8 @@ import streamlit as st
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -77,7 +78,7 @@ if "vectorstore" not in st.session_state:
 # =========================================================
 # 🔄 DOCUMENT PROCESSING & VECTOR DB INGESTION
 # =========================================================
-def process_documents(files, google_api_key):
+def process_documents(files):
     documents = []
 
     for file in files:
@@ -100,11 +101,8 @@ def process_documents(files, google_api_key):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # Clean embedding model specification
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
-        google_api_key=google_api_key
-    )
+    # 🚀 Reliable local HuggingFace embedding (No 404 API errors!)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
     vectorstore = Chroma.from_documents(
         documents=chunks,
@@ -116,11 +114,11 @@ def process_documents(files, google_api_key):
 
 
 # Process Button Logic
-if uploaded_files and api_key:
+if uploaded_files:
     if st.sidebar.button("🚀 Process & Index Documents"):
         with st.spinner("📄 Extracting Text, Generating Vector Embeddings..."):
             try:
-                st.session_state.vectorstore = process_documents(uploaded_files, api_key)
+                st.session_state.vectorstore = process_documents(uploaded_files)
                 st.sidebar.success(f"✅ Success! Indexed {len(uploaded_files)} PDF(s).")
             except Exception as e:
                 st.sidebar.error(f"Error processing files: {str(e)}")
