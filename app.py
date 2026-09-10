@@ -1,15 +1,16 @@
 import os
 import tempfile
 import streamlit as st
+import google.generativeai as genai
 
 # Modern LangChain Imports
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.embeddings import Embeddings
 
 # =========================================================
 # ⚙️ PAGE CONFIGURATION
@@ -38,6 +39,30 @@ st.markdown("""
 
 st.title("🧠 Enterprise RAG Intelligence System")
 st.caption("⚡ Upload any PDF / Research Paper & Chat with 100% Citation Accuracy")
+
+# Custom Direct Gemini Embeddings (Bypasses LangChain Bug & PyTorch requirement)
+class DirectGeminiEmbeddings(Embeddings):
+    def __init__(self, api_key: str):
+        genai.configure(api_key=api_key)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        embeddings = []
+        for text in texts:
+            res = genai.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_document"
+            )
+            embeddings.append(res['embedding'])
+        return embeddings
+
+    def embed_query(self, text: str) -> list[float]:
+        res = genai.embed_content(
+            model="models/text-embedding-004",
+            content=text,
+            task_type="retrieval_query"
+        )
+        return res['embedding']
 
 # =========================================================
 # 🔑 SIDEBAR - API KEY, FILE UPLOAD & SAIMA'S BRANDING
@@ -78,7 +103,7 @@ if "vectorstore" not in st.session_state:
 # =========================================================
 # 🔄 DOCUMENT PROCESSING & VECTOR DB INGESTION
 # =========================================================
-def process_documents(files):
+def process_documents(files, google_api_key):
     documents = []
 
     for file in files:
@@ -101,8 +126,8 @@ def process_documents(files):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # 🚀 Reliable local HuggingFace embedding (No 404 API errors!)
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    # Direct Gemini API Embeddings
+    embeddings = DirectGeminiEmbeddings(api_key=google_api_key)
 
     vectorstore = Chroma.from_documents(
         documents=chunks,
@@ -114,11 +139,11 @@ def process_documents(files):
 
 
 # Process Button Logic
-if uploaded_files:
+if uploaded_files and api_key:
     if st.sidebar.button("🚀 Process & Index Documents"):
         with st.spinner("📄 Extracting Text, Generating Vector Embeddings..."):
             try:
-                st.session_state.vectorstore = process_documents(uploaded_files)
+                st.session_state.vectorstore = process_documents(uploaded_files, api_key)
                 st.sidebar.success(f"✅ Success! Indexed {len(uploaded_files)} PDF(s).")
             except Exception as e:
                 st.sidebar.error(f"Error processing files: {str(e)}")
