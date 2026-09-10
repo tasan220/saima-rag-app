@@ -1,16 +1,14 @@
 import os
 import tempfile
 import streamlit as st
-import google.generativeai as genai
 
 # Modern LangChain Imports
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_community.retrievers import BM25Retriever
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.embeddings import Embeddings
 
 # =========================================================
 # ⚙️ PAGE CONFIGURATION
@@ -40,30 +38,6 @@ st.markdown("""
 st.title("🧠 Enterprise RAG Intelligence System")
 st.caption("⚡ Upload any PDF / Research Paper & Chat with 100% Citation Accuracy")
 
-# Custom Direct Gemini Embeddings (Bypasses LangChain Bug & PyTorch requirement)
-class DirectGeminiEmbeddings(Embeddings):
-    def __init__(self, api_key: str):
-        genai.configure(api_key=api_key)
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        embeddings = []
-        for text in texts:
-            res = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
-            )
-            embeddings.append(res['embedding'])
-        return embeddings
-
-    def embed_query(self, text: str) -> list[float]:
-        res = genai.embed_content(
-            model="models/text-embedding-004",
-            content=text,
-            task_type="retrieval_query"
-        )
-        return res['embedding']
-
 # =========================================================
 # 🔑 SIDEBAR - API KEY, FILE UPLOAD & SAIMA'S BRANDING
 # =========================================================
@@ -89,21 +63,21 @@ with st.sidebar:
     st.markdown("### 👩‍💻 Project Owner & Developer")
     st.markdown("**Developed by:** Saima")
     st.markdown("**Role:** AI & Python Developer")
-    st.markdown("**Tech Stack:** LangChain | ChromaDB | Gemini 1.5 | Streamlit")
+    st.markdown("**Tech Stack:** LangChain | BM25 | Gemini 1.5 | Streamlit")
     st.markdown("📧 **Contact:** saima.developer@gmail.com")
 
 # Session State Initializations
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "vectorstore" not in st.session_state:
-    st.session_state.vectorstore = None
+if "retriever" not in st.session_state:
+    st.session_state.retriever = None
 
 
 # =========================================================
-# 🔄 DOCUMENT PROCESSING & VECTOR DB INGESTION
+# 🔄 DOCUMENT PROCESSING & INDEXING
 # =========================================================
-def process_documents(files, google_api_key):
+def process_documents(files):
     documents = []
 
     for file in files:
@@ -126,24 +100,19 @@ def process_documents(files, google_api_key):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # Direct Gemini API Embeddings
-    embeddings = DirectGeminiEmbeddings(api_key=google_api_key)
+    # Ultra-fast & bulletproof BM25 Retriever (No Embedding API needed)
+    retriever = BM25Retriever.from_documents(chunks)
+    retriever.k = 4
 
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name="enterprise_rag"
-    )
-
-    return vectorstore
+    return retriever
 
 
 # Process Button Logic
-if uploaded_files and api_key:
+if uploaded_files:
     if st.sidebar.button("🚀 Process & Index Documents"):
-        with st.spinner("📄 Extracting Text, Generating Vector Embeddings..."):
+        with st.spinner("📄 Extracting Text & Indexing Documents..."):
             try:
-                st.session_state.vectorstore = process_documents(uploaded_files, api_key)
+                st.session_state.retriever = process_documents(uploaded_files)
                 st.sidebar.success(f"✅ Success! Indexed {len(uploaded_files)} PDF(s).")
             except Exception as e:
                 st.sidebar.error(f"Error processing files: {str(e)}")
@@ -169,7 +138,7 @@ if query := st.chat_input("Ask anything from your documents..."):
         st.warning("⚠️ Please provide your Gemini API Key in the sidebar.")
         st.stop()
 
-    if not st.session_state.vectorstore:
+    if not st.session_state.retriever:
         st.warning("⚠️ Please upload and process at least one PDF first.")
         st.stop()
 
@@ -178,13 +147,9 @@ if query := st.chat_input("Ask anything from your documents..."):
         st.markdown(query)
 
     with st.chat_message("assistant"):
-        with st.spinner("🧠 Searching Vector Database & Reasoning..."):
+        with st.spinner("🧠 Searching Indexed Documents & Reasoning..."):
 
-            retriever = st.session_state.vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": 4}
-            )
-            retrieved_docs = retriever.invoke(query)
+            retrieved_docs = st.session_state.retriever.invoke(query)
 
             context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
 
