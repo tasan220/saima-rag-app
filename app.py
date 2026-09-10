@@ -37,37 +37,61 @@ st.title("🧠 Enterprise RAG Intelligence System")
 st.caption("⚡ Upload any PDF / Research Paper & Chat with 100% Citation Accuracy")
 
 # =========================================================
-# 🔑 DIRECT REST API CALLER FOR GEMINI (Fallback Strategy)
+# 🔑 DIRECT MULTI-MODEL FALLBACK CALLER FOR GEMINI
 # =========================================================
 def call_gemini_rest_api(api_key, prompt_text):
-    models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-pro"
-    ]
-    
     headers = {"Content-Type": "application/json"}
     payload = {
         "contents": [
             {"parts": [{"text": prompt_text}]}
         ]
     }
-    
-    last_error = ""
-    for model_name in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+
+    # All possible model routes for Google Gemini API Keys
+    candidates = [
+        ("v1beta", "models/gemini-1.5-flash"),
+        ("v1beta", "models/gemini-1.5-flash-latest"),
+        ("v1beta", "models/gemini-2.0-flash"),
+        ("v1beta", "models/gemini-1.5-pro"),
+        ("v1", "models/gemini-1.5-flash"),
+        ("v1", "models/gemini-pro"),
+        ("v1beta", "models/gemini-pro")
+    ]
+
+    errors = []
+    # 1. Try predefined model candidates
+    for version, model_path in candidates:
+        url = f"https://generativelanguage.googleapis.com/{version}/{model_path}:generateContent?key={api_key}"
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
-            if response.status_code == 200:
-                data = response.json()
+            res = requests.post(url, json=payload, headers=headers, timeout=20)
+            if res.status_code == 200:
+                data = res.json()
                 return data['candidates'][0]['content']['parts'][0]['text']
             else:
-                last_error = f"Model {model_name} returned status {response.status_code}"
+                errors.append(f"{model_path} [{version}] -> {res.status_code}")
         except Exception as e:
-            last_error = str(e)
+            errors.append(f"{model_path} -> {str(e)}")
             continue
 
-    raise Exception(f"All models failed. Last error: {last_error}")
+    # 2. Dynamic Discovery Fallback if standard endpoints fail
+    try:
+        list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+        l_res = requests.get(list_url, timeout=10)
+        if l_res.status_code == 200:
+            avail_models = [
+                m['name'] for m in l_res.json().get('models', [])
+                if 'generateContent' in m.get('supportedGenerationMethods', [])
+            ]
+            for m_name in avail_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/{m_name}:generateContent?key={api_key}"
+                res = requests.post(url, json=payload, headers=headers, timeout=20)
+                if res.status_code == 200:
+                    data = res.json()
+                    return data['candidates'][0]['content']['parts'][0]['text']
+    except Exception as ex:
+        errors.append(f"List discovery failed: {str(ex)}")
+
+    raise Exception(f"All Gemini endpoints failed. Debug logs: {', '.join(errors)}")
 
 
 # =========================================================
