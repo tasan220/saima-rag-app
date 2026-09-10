@@ -100,9 +100,9 @@ def process_documents(files, google_api_key):
     )
     chunks = text_splitter.split_documents(documents)
 
-    # 🛑 Fixed embedding model version here
+    # Clean embedding model specification
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", 
+        model="models/text-embedding-004",
         google_api_key=google_api_key
     )
 
